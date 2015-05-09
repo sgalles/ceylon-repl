@@ -1,51 +1,90 @@
+import ceylon.collection {
+    HashMap
+}
 import ceylon.file {
     Path,
     Nil,
     File,
     parsePath
 }
+import ceylon.process {
+    createProcess,
+    Process,
+    currentOutput,
+    currentError
+}
 
-class VFile(shared String name, shared String text){}
-class VDir(shared String name, shared {VNode*} children){}
-alias VNode => VFile|VDir;
-void createTree(Path parentDir, {VNode*} children){
-    for(node in children){
-        switch(node)
-        case(is VDir){ 
-            createTree(parentDir.childPath(node.name), node.children);
-        }
-        case(is VFile){ 
-            assert(is File file = 
-                let(resource = parentDir.childPath(node.name).resource)
-                if(is Nil resource) then resource.createFile(true) else resource
-            );
-            try (writer = file.Overwriter()) {
-                writer.write(node.text);
-            }
+
+class FileContent(shared String name, shared {<String|String[]>*} lines){}
+void createFiles(Path dir)({FileContent*} filesContent){
+    for(fc in filesContent){
+        assert(is File file = 
+            let(resource = dir.childPath(fc.name).resource)
+            if(is Nil resource) then resource.createFile(true) else resource
+        );
+        try (writer = file.Overwriter()) {
+            fc.lines.collect((t) => switch(t) case(is String) [t] case(is String[]) t)
+                    .flatMap(identity)
+                    .each(writer.writeLine);
         }
     }
 }
 
-VDir replTemplate() 
- => VDir {name = "source";
-        VDir{name = "generatedrepl";
-            VFile(
-                "module.ceylon",
-                """module repl "1.0.0" { import ceylon.file "1.1.1";}"""
-            ),
-            VFile(
-                "package.ceylon",
-                """shared package repl;"""
-            )
+String generatedModuleName = "generatedrepl";
+
+[FileContent+] replTemplate(String[] runLines) 
+ => [
+        FileContent{
+            name = "module.ceylon";
+            "module ``generatedModuleName`` \"1.0.0\" { import ceylon.file \"1.1.1\";}"
+        },
+        FileContent{
+            name = "package.ceylon";
+            "shared package ``generatedModuleName``;"
+        },
+        FileContent{
+            name = "run.ceylon";
+            """import ceylon.file { ...}""",
+            "shared void run(){",
+            runLines,
+            "}"
         }
-};  
+   ];
+
+Boolean ceylonCommand(String command, Path projectPath){
+    Process p = createProcess { 
+        command = "ceylon.bat";
+        arguments = command.split();                                            
+        path = projectPath;
+        output = currentOutput;
+        error = currentError;
+    };
+    return p.waitForExit() == 0;
+}
 
 "Run the module `org.ceylonrepl`."
 shared void run() {
     
-    createTree(parsePath("C:/work/test"), {replTemplate()});
-         
+    value varPerName = HashMap<String, String>();
+    value projectPath = parsePath("C:/work/test");
+    value createProjectFiles = createFiles(projectPath.childPath("source/generatedrepl"));
+    while(true){
+        print("command ?");
+        if(exists line = process.readLine()){
+            createProjectFiles(replTemplate(["``line``;"]));
+            if(ceylonCommand("compile",projectPath)){
+                ceylonCommand("run ``generatedModuleName``/1.0.0",projectPath);
+            }
+            
+            
+
+        }
+    }
     
+    
+    //
+    //
+
 }
     
 
