@@ -5,7 +5,8 @@ import ceylon.file {
     Path,
     Nil,
     File,
-    parsePath
+    parsePath,
+    Reader
 }
 import ceylon.interop.java {
     javaString
@@ -35,9 +36,17 @@ shared void run() {
             command = "ceylon.``ext``";
             arguments = command.split();                                            
             path = projectPath;
-            output = currentOutput;
+            //output = currentOutput;
             error = currentError;
         };
+        if (is Reader reader = p.output) {
+            while (exists line = reader.readLine()) {
+                if(line.startsWith("@@@")){
+                    print(line);
+                }
+                
+            }
+        }
         return p.waitForExit() == 0;
     }
     
@@ -56,25 +65,31 @@ shared void run() {
     }
     
     value decl = HashMap<String, String>();
-    String withPrint(String s) => "print(``s``);";
+    String withPrint(String s) => "print(\"@@@\".plus((``s``).string));";
     while(true){
         print("command ?");
         if(exists line = process.readLine()){
-            value m = identifierRe.matcher(javaString(line));
+            value identifierMatcher = identifierRe.matcher(javaString(line));
             value [
                 trailingLines,
-                commit] =   
-                             if(m.matches()) 
-                             then let(varName = m.group(1),varDecl = "value ``line``;") [
-                                    [varDecl, withPrint(varName)],
-                                    void(){decl.put(varName, varDecl);}
+                commit,
+                String? newVariableName] =   
+                             if(identifierMatcher.matches()) 
+                             then let(variableName = identifierMatcher.group(1),variableDeclaration = "value ``line``;") [
+                                    [variableDeclaration, withPrint(variableName)],
+                                    void(){decl.put(variableName, variableDeclaration);},
+                                    variableName
                              ]
                              else [
-                                [withPrint(line)],
-                                void(){}
+                                let(expression = line) [withPrint(expression)],
+                                void(){},
+                                null
                              ];
                 
-            String[] lines = [for (k->v in decl) v].append(trailingLines);   
+                
+            String[] lines = [for (k->v in decl) 
+                             if(if(exists newVariableName) then k != newVariableName else true) v
+                ].append(trailingLines);   
             createFiles(replTemplate(lines));
             if(ceylonCommand("compile")){
                 commit();
@@ -108,7 +123,7 @@ class FileContent(shared String name, shared {<String|String[]>*} lines){}
     }
 ];
     
-Pattern identifierRe = Pattern.compile("""\s*(\S+)\s*=[^=]+""");
+Pattern identifierRe = Pattern.compile("""^\s*(\w+)\s*=[^=]+""");
     
 
     
